@@ -301,7 +301,7 @@ validate_and_form_response([Head|Rest], Resp) ->
         NextWordLength ->
             {Length1, Length2} = next_word_size(NextWordLength),
             validate_and_form_response(Rest, Resp ++ [[Head, find_other_word(NextWordLength, Rest)]] ++
-                [[Head, find_other_word(Length1, Rest), find_other_word(Length2, Rest)]])
+                [[Head, find_other_word(Length1, Rest), find_other_word(Length2, lists:reverse(Rest))]])
     end.
 
 find_other_word(_, []) -> no_match;

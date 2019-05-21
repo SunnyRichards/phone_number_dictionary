@@ -80,10 +80,10 @@ receive_concurrent_tasks(Ref, PidList, TimeoutMilliSec, AccIn) ->
             %% This is time consuming since it is O(N),
             %% but this interface shall not be invoked for very high
             %% concurrency.
-            RemainingPids = PidList -- [Pid],
+            RemainingPidList = PidList -- [Pid],
             T2 = erlang:system_time(millisecond),
             %% Notice that some time has elapsed, so account for that
-            receive_concurrent_tasks(Ref, RemainingPids,
+            receive_concurrent_tasks(Ref, RemainingPidList,
                 TimeoutMilliSec - (T2 - T1),
                 [R | AccIn])
     after
