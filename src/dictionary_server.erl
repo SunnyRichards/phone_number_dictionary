@@ -33,7 +33,8 @@
 %%% API
 %%%===================================================================
 search_number(PhoneNumber) ->
-    gen_server:call(?MODULE, {search_number ,PhoneNumber}, infinity).
+    StartTime = erlang:monotonic_time(millisecond),
+    gen_server:call(?MODULE, {search_number ,PhoneNumber, StartTime}, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -89,9 +90,10 @@ init([]) ->
     {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
     {stop, Reason :: term(), NewState :: #state{}}).
 
-handle_call({search_number, PhoneNumber}, _From, State) ->
+handle_call({search_number, PhoneNumber, StartTime}, _From, State) ->
     Response = search(PhoneNumber),
-    {reply, Response, State};
+    EndTime = erlang:monotonic_time(millisecond),
+    {reply, {(EndTime - StartTime)/1000, Response}, State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
