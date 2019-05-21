@@ -273,10 +273,10 @@ get_word(Number) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function will return the matched dictionary word for the
-%% corresponding numerical map after searching it from the ets table
+%% This function will return valid response removing the unpaired words
+%% from the dictionary and also gives all the combinations of the words
 %%
-%% @spec get_word(Number) -> DictionaryWord
+%% @spec validate_and_form_response(Number :: , Resp) -> DictionaryWord
 %% @end
 %%--------------------------------------------------------------------
 
@@ -301,8 +301,7 @@ validate_and_form_response([Head|Rest], Resp) ->
                 [[Head, find_other_word(Length1, Rest), find_other_word(Length2, Rest)]])
     end.
 
-find_other_word(_, []) ->
-  no_match;
+find_other_word(_, []) -> no_match;
 
 find_other_word(NextWordLength, [Word|Rest]) ->
     case byte_size(Word) =:= NextWordLength of
