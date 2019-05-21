@@ -16,7 +16,7 @@ QuickStart
 
 ```erlang
 1>  dictionary_server:search_number(6686787825).
-[[<<"MOTORTRUCK">>],
+   [[<<"MOTORTRUCK">>],
     [<<"NOT">>,<<"OOT">>,<<"ONTO">>],
     [<<"OOT">>,<<"MOT">>,<<"ONTO">>],
     [<<"MOT">>,<<"TAJ">>,<<"ONTO">>],
