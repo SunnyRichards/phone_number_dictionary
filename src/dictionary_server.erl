@@ -10,6 +10,7 @@
 -author("sunnyrichards").
 
 -behaviour(gen_server).
+-include("dictionary.hrl").
 
 %% API
 -export([start_link/0]).
@@ -60,6 +61,12 @@ start_link() ->
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
+    Directory = code:priv_dir(?APPLICATION_NAME),
+    {ok, DataBin} = file:read_file(Directory ++ "/dictionary.txt"),
+    DataBinList = binary:split(DataBin, <<"\n">>, [global]),
+    DictRecList = make_record(DataBinList, []),
+    ets:new(dictionary, [bag, {keypos,#dict.word}, named_table]),
+    ets:insert(dictionary, DictRecList),
     {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -144,3 +151,25 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+make_record([], RecordList) ->
+    RecordList;
+
+make_record([Word|Others], RecordList) ->
+    KeyMap =  [{2, [$A, $B, $C]}, {3, [$D, $E, $F]}, {4,[$G, $H, $I]}, {5, [$J, $K, $L]},
+        {6, [$M, $N, $O]}, {7, [$P, $Q, $R, $S]}, {8, [$T, $U, $V]}, {9, [$W, $X, $Y, $Z]}],
+
+
+    NumericalBin =  lists:foldl(fun(Character, Rem) ->
+        Fun = fun({Key, ValueList}, Resp) ->
+            case lists:member(Character, ValueList) of
+                true ->
+                    Data = integer_to_binary(Key),
+                    <<Rem/binary, Data/binary>>;
+                false -> Resp
+            end end,
+        lists:foldl(fun(Data, Rem) ->
+            Fun(Data, Rem) end, Rem, KeyMap)  end, <<>>, binary_to_list(Word)),
+
+    Record = {dict, Word, NumericalBin},
+    make_record(Others, [Record|RecordList]).
