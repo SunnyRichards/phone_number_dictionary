@@ -11,9 +11,11 @@
 
 -behaviour(gen_server).
 -include("dictionary.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 %% API
 -export([start_link/0]).
+-export([search_number/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -30,6 +32,8 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+search_number(PhoneNumber) ->
+    gen_server:call(?MODULE, {search_number ,PhoneNumber}, infinity).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -84,6 +88,11 @@ init([]) ->
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
     {stop, Reason :: term(), NewState :: #state{}}).
+
+handle_call({search_number, PhoneNumber}, _From, State) ->
+    Response = search(PhoneNumber),
+    {reply, Response, State};
+
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
@@ -152,13 +161,49 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-make_record([], RecordList) ->
-    RecordList;
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Call by gen server to fetch the dictionary words for the given
+%% phone number
+%%
+%% @spec search(PhoneNumber) -> Response
+%% @end
+%%--------------------------------------------------------------------
+
+-spec(search(PhoneNumber :: term()) ->
+    Response :: list()).
+%%--------------------------------------------------------------------
+
+search(PhoneNumber) ->
+    PhoneNumString = dictionary_util:convert_to_list(PhoneNumber),
+    Lists = split_number(PhoneNumString, PhoneNumString, 3, []),
+    {Case1, RestList} = lists:split(3, Lists),
+    {Case2, Case3} = lists:split(2, RestList),
+    [get_word(list_to_binary(Num)) || Num <- Case1] ++
+    [get_word(list_to_binary(Num)) || Num <- Case2] ++
+    [get_word(list_to_binary(Num)) || Num <- Case3].
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function is called by a gen_server init where all the dictionary
+%% words along with their numerical value will be converted into
+%% pre-defined record lists to be stored in the ets table
+%%
+%% @spec make_record(WordsList, RecordList) -> RecordList.
+%% @end
+%%--------------------------------------------------------------------
+
+-spec(make_record(WordsList :: list(binary()), RecordList :: list()) ->
+    RecordList :: list(tuple())).
+%%--------------------------------------------------------------------
+
+make_record([], RecordList) -> RecordList;
 
 make_record([Word|Others], RecordList) ->
     KeyMap =  [{2, [$A, $B, $C]}, {3, [$D, $E, $F]}, {4,[$G, $H, $I]}, {5, [$J, $K, $L]},
         {6, [$M, $N, $O]}, {7, [$P, $Q, $R, $S]}, {8, [$T, $U, $V]}, {9, [$W, $X, $Y, $Z]}],
-
 
     NumericalBin =  lists:foldl(fun(Character, Rem) ->
         Fun = fun({Key, ValueList}, Resp) ->
@@ -173,3 +218,49 @@ make_record([Word|Others], RecordList) ->
 
     Record = {dict, Word, NumericalBin},
     make_record(Others, [Record|RecordList]).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function will split the 10 digit phone number for all the
+%% possible and valid lengths
+%%
+%% @spec split_number(Num, ActualNum, Length, Resp) -> SplitNumberList
+%% @end
+%%--------------------------------------------------------------------
+
+-spec(split_number(Num :: list(), ActualNum  :: list(), Length :: integer(), Resp :: list()) ->
+    SplitNumberList:: list()).
+%%--------------------------------------------------------------------
+
+split_number(Num, ActualNum, Length, Resp) when length(Num) > Length ->
+    {List2, List3} = lists:split(Length, Num),
+    case List3 of
+        List3 when length(List3) > 3 ->
+            split_number(List3, ActualNum, Length, Resp ++ [List2]);
+        List3 ->
+            split_number(ActualNum, ActualNum, Length +1, Resp)
+    end;
+
+split_number(_, ActualNum, Length, Resp) when Length =:= 10 ->
+    Resp ++ [ActualNum];
+
+split_number(Num, ActualNum, Length, Resp) ->
+    split_number(ActualNum, ActualNum, Length +1, Resp ++ [Num]).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function will return the matched dictionary word for the
+%% corresponding numerical map after searching it from the ets table
+%%
+%% @spec get_word(Number) -> DictionaryWord
+%% @end
+%%--------------------------------------------------------------------
+
+-spec(get_word(Number :: binary()) -> DictionaryWord :: binary()).
+%%--------------------------------------------------------------------
+
+get_word(Number) ->
+    ets:select(dictionary, ets:fun2ms(fun(Dictionary = #dict{number_map = NumberMap})
+        when NumberMap =:= Number -> Dictionary#dict.word end)).
