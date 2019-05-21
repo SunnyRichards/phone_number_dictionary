@@ -59,4 +59,4 @@ QuickStart
      [<<"RUCK">>,<<"PUS">>,<<"TAJ">>],
      [<<"MOTORTRUCK">>],
      [<<"TRUCK">>,<<"USUAL">>]]
-     ```
+```
