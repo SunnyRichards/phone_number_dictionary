@@ -177,12 +177,9 @@ code_change(_OldVsn, State, _Extra) ->
 
 search(PhoneNumber) ->
     PhoneNumString = dictionary_util:convert_to_list(PhoneNumber),
-    Lists = split_number(PhoneNumString, PhoneNumString, 3, []),
-    {Case1, RestList} = lists:split(3, Lists),
-    {Case2, Case3} = lists:split(2, RestList),
-    [get_word(list_to_binary(Num)) || Num <- Case1] ++
-    [get_word(list_to_binary(Num)) || Num <- Case2] ++
-    [get_word(list_to_binary(Num)) || Num <- Case3].
+    Lists = split_number(PhoneNumString),
+    ResponseList = [get_word(list_to_binary(Num)) || Num <- Lists],
+    validate_and_form_response(lists:flatten(ResponseList), []).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -225,28 +222,36 @@ make_record([Word|Others], RecordList) ->
 %% This function will split the 10 digit phone number for all the
 %% possible and valid lengths
 %%
-%% @spec split_number(Num, ActualNum, Length, Resp) -> SplitNumberList
+%% @spec split_number(Num) -> SplitNumberList
 %% @end
 %%--------------------------------------------------------------------
 
--spec(split_number(Num :: list(), ActualNum  :: list(), Length :: integer(), Resp :: list()) ->
+-spec(split_number(Num :: list()) ->
     SplitNumberList:: list()).
 %%--------------------------------------------------------------------
 
-split_number(Num, ActualNum, Length, Resp) when length(Num) > Length ->
-    {List2, List3} = lists:split(Length, Num),
-    case List3 of
-        List3 when length(List3) > 3 ->
-            split_number(List3, ActualNum, Length, Resp ++ [List2]);
-        List3 ->
-            split_number(ActualNum, ActualNum, Length +1, Resp)
-    end;
+split_number(Num) ->
+    lists:foldl(fun(List, Resp) ->
+        Resp ++ split(List, Num, []) end, lists:foldl(fun(Split, Response) ->
+        {Num1, Num2} = lists:split(Split, Num),
+        Response ++ [Num1] ++ [Num2] end, [Num], lists:seq(3,7)), get_other_combinations(10, 3, [])).
 
-split_number(_, ActualNum, Length, Resp) when Length =:= 10 ->
-    Resp ++ [ActualNum];
+get_other_combinations(Number, Limit, Resp) when Number >= Limit ->
+    case Number - Limit of
+        Value when Value >= Limit->
+            get_other_combinations(Value, Limit, [Limit|Resp]);
+        _ ->
+            lists:usort(perms([Number|Resp]))
+    end.
 
-split_number(Num, ActualNum, Length, Resp) ->
-    split_number(ActualNum, ActualNum, Length +1, Resp ++ [Num]).
+perms([]) -> [[]];
+perms(L) -> [[H|T] || H <- L, T <- perms(L--[H])].
+
+split([], [], Resp) -> Resp;
+
+split([SplitNum|Rest], Num, Resp) ->
+    {Num1, Num2} = lists:split(SplitNum, Num),
+    split(Rest, Num2, Resp ++ [Num1]).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -264,3 +269,49 @@ split_number(Num, ActualNum, Length, Resp) ->
 get_word(Number) ->
     ets:select(dictionary, ets:fun2ms(fun(Dictionary = #dict{number_map = NumberMap})
         when NumberMap =:= Number -> Dictionary#dict.word end)).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function will return the matched dictionary word for the
+%% corresponding numerical map after searching it from the ets table
+%%
+%% @spec get_word(Number) -> DictionaryWord
+%% @end
+%%--------------------------------------------------------------------
+
+-spec(validate_and_form_response(Number :: binary(), Resp :: list()) -> DictionaryWord :: binary()).
+%%--------------------------------------------------------------------
+validate_and_form_response([], Resp) ->
+    lists:foldl(fun(ElementList, Response) ->
+        case lists:member(no_match, ElementList) of
+            true ->
+                Response;
+            false ->
+                Response ++ [ElementList]
+        end end, [], Resp);
+
+validate_and_form_response([Head|Rest], Resp) ->
+    case 10 - byte_size(Head)of
+        0 ->
+            validate_and_form_response(Rest, Resp ++ [[Head]]);
+        NextWordLength ->
+            {Length1, Length2} = next_word_size(NextWordLength),
+            validate_and_form_response(Rest, Resp ++ [[Head, find_other_word(NextWordLength, Rest)]] ++
+                [[Head, find_other_word(Length1, Rest), find_other_word(Length2, Rest)]])
+    end.
+
+find_other_word(_, []) ->
+  no_match;
+
+find_other_word(NextWordLength, [Word|Rest]) ->
+    case byte_size(Word) =:= NextWordLength of
+        true ->
+            Word;
+        false ->
+            find_other_word(NextWordLength, Rest)
+    end.
+
+next_word_size(NextWordLength) when NextWordLength rem 2 =:= 0 andalso NextWordLength >= 6-> {3,3};
+next_word_size(NextWordLength) when NextWordLength >= 6 -> {3,4};
+next_word_size(_) -> {0,0}.
