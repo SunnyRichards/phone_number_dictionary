@@ -15,7 +15,7 @@
 
 %% API
 -export([start_link/0]).
--export([search_number/1]).
+-export([search_number/1, get_word/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -180,7 +180,8 @@ code_change(_OldVsn, State, _Extra) ->
 search(PhoneNumber) ->
     PhoneNumString = dictionary_util:convert_to_list(PhoneNumber),
     Lists = split_number(PhoneNumString),
-    ResponseList = [get_word(list_to_binary(Num)) || Num <- Lists],
+    Tasks = [{dictionary_server, get_word, [list_to_binary(Num)]} || Num <- Lists],
+    {ok, ResponseList} = dictionary_util:run_concurrent(Tasks, 1200000),
     validate_and_form_response(lists:flatten(ResponseList), []).
 
 %%--------------------------------------------------------------------
