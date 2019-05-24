@@ -8,10 +8,7 @@
     stdlib
    ]},
   {env,[
-   {dictionary_data, [
-    {max_phone_number_digits, 10},
-    {min_character_words, 3}
-   ]}
+    {min_character_words, 1} %% should be always less than or equal to max digits
   ]},
   {modules, []},
 

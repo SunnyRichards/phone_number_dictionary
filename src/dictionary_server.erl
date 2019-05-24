@@ -27,7 +27,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {}).
+-record(state, {min_word_limit}).
 
 %%%===================================================================
 %%% API
@@ -72,7 +72,7 @@ init([]) ->
     DictRecList = make_record(DataBinList, []),
     ets:new(dictionary, [bag, {keypos,#dict.word}, named_table]),
     ets:insert(dictionary, DictRecList),
-    {ok, #state{}}.
+    {ok, #state{min_word_limit = application:get_env(?APPLICATION_NAME, min_character_words, 3)}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -91,9 +91,8 @@ init([]) ->
     {stop, Reason :: term(), NewState :: #state{}}).
 
 handle_call({search_number, PhoneNumber, StartTime}, _From, State) ->
-    Response = search(PhoneNumber),
-    EndTime = erlang:monotonic_time(millisecond),
-    {reply, {(EndTime - StartTime)/1000, Response}, State};
+    Response = search(PhoneNumber, State#state.min_word_limit),
+    {reply, {(erlang:monotonic_time(millisecond) - StartTime)/1000, Response}, State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -169,20 +168,27 @@ code_change(_OldVsn, State, _Extra) ->
 %% Call by gen server to fetch the dictionary words for the given
 %% phone number
 %%
-%% @spec search(PhoneNumber) -> Response
+%% @spec search(PhoneNumber, MaxDigits, MinWordLimit) -> Response
 %% @end
 %%--------------------------------------------------------------------
 
--spec(search(PhoneNumber :: term()) ->
+-spec(search(PhoneNumber :: term(), MinWordLimit :: integer()) ->
     Response :: list()).
 %%--------------------------------------------------------------------
 
-search(PhoneNumber) ->
+search(PhoneNumber, MinWordLimit) ->
     PhoneNumString = dictionary_util:convert_to_list(PhoneNumber),
-    Lists = split_number(PhoneNumString),
-    Tasks = [{dictionary_server, get_word, [list_to_binary(Num)]} || Num <- Lists],
-    {ok, ResponseList} = dictionary_util:run_concurrent(Tasks, 1200000),
-    validate_and_form_response(lists:flatten(ResponseList), []).
+
+    case length(PhoneNumString) >= MinWordLimit of
+        true ->
+            Lists = split_number(PhoneNumString, length(PhoneNumString), MinWordLimit),
+            Tasks = [{dictionary_server, get_word, [list_to_binary(Num)]} || Num <- Lists],
+            {ok, ResponseList} = dictionary_util:run_concurrent(Tasks, 1200000),
+            validate_and_form_response(lists:flatten(ResponseList), length(PhoneNumString), MinWordLimit, []);
+        false ->
+            LimitBin = integer_to_binary(MinWordLimit),
+            {invalid_input, <<"number should be greater than the minimum word LIMIT => ", LimitBin/binary>>}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -225,19 +231,28 @@ make_record([Word|Others], RecordList) ->
 %% This function will split the 10 digit phone number for all the
 %% possible and valid lengths
 %%
-%% @spec split_number(Num) -> SplitNumberList
+%% @spec split_number(Num, MaxDigits, MinWordLimit) -> SplitNumberList
 %% @end
 %%--------------------------------------------------------------------
 
--spec(split_number(Num :: list()) ->
+-spec(split_number(Num :: list(), MaxDigits :: integer(), MinWordLimit :: integer()) ->
     SplitNumberList:: list()).
 %%--------------------------------------------------------------------
 
-split_number(Num) ->
+split_number(Num, MaxDigits, MinWordLimit) when MinWordLimit > MaxDigits div 2 -> [Num];
+
+split_number(Num, MaxDigits, MinWordLimit) when MinWordLimit =:= MaxDigits div 2 ->
+    lists:foldl(fun(Split, Response) ->
+        {Num1, Num2} = lists:split(Split, Num),
+        Response ++ [Num1] ++ [Num2] end, [Num],
+        lists:seq(MinWordLimit, MaxDigits-MinWordLimit));
+
+split_number(Num, MaxDigits, MinWordLimit) ->
     lists:foldl(fun(List, Resp) ->
         Resp ++ split(List, Num, []) end, lists:foldl(fun(Split, Response) ->
         {Num1, Num2} = lists:split(Split, Num),
-        Response ++ [Num1] ++ [Num2] end, [Num], lists:seq(3,7)), get_other_combinations(10, 3, [])).
+        Response ++ [Num1] ++ [Num2] end, [Num],
+        lists:seq(MinWordLimit, MaxDigits-MinWordLimit)), get_other_combinations(MaxDigits, MinWordLimit, [])).
 
 get_other_combinations(Number, Limit, Resp) when Number >= Limit ->
     case Number - Limit of
@@ -279,13 +294,17 @@ get_word(Number) ->
 %% This function will return valid response removing the unpaired words
 %% from the dictionary and also gives all the combinations of the words
 %%
-%% @spec validate_and_form_response(Number :: , Resp) -> DictionaryWord
+%% @spec
+%% validate_and_form_response(Number, MaxDigits, MinWordLimit, Resp) ->
+%% DictionaryWord
 %% @end
 %%--------------------------------------------------------------------
 
--spec(validate_and_form_response(Number :: binary(), Resp :: list()) -> DictionaryWord :: binary()).
+-spec(validate_and_form_response(Number :: binary(), MaxDigits :: integer(), MinWordLimit :: integer(), Resp :: list())
+        -> DictionaryWord :: binary()).
 %%--------------------------------------------------------------------
-validate_and_form_response([], Resp) ->
+
+validate_and_form_response([], _MaxDigits, _MinWordLimit, Resp) ->
     lists:foldl(fun(ElementList, Response) ->
         case lists:member(no_match, ElementList) of
             true ->
@@ -294,14 +313,19 @@ validate_and_form_response([], Resp) ->
                 Response ++ [ElementList]
         end end, [], Resp);
 
-validate_and_form_response([Head|Rest], Resp) ->
-    case 10 - byte_size(Head)of
+validate_and_form_response([Head|Rest], MaxDigits, MinWordLimit, Resp) ->
+    case MaxDigits - byte_size(Head)of
         0 ->
-            validate_and_form_response(Rest, Resp ++ [[Head]]);
+            validate_and_form_response(Rest, MaxDigits, MinWordLimit, Resp ++ [[Head]]);
         NextWordLength ->
-            {Length1, Length2} = next_word_size(NextWordLength),
-            validate_and_form_response(Rest, Resp ++ [[Head, find_other_word(NextWordLength, Rest)]] ++
-                [[Head, find_other_word(Length1, Rest), find_other_word(Length2, lists:reverse(Rest)    )]])
+            OtherWordCombo = get_other_combinations(NextWordLength, MinWordLimit, []),
+
+            NewData =
+                lists:foldl(fun(WordCombo, Data) ->
+                Data ++ [lists:foldl(fun(WordLength, OtherWord) ->
+                OtherWord ++ [find_other_word(WordLength, Rest)] end,  [Head], WordCombo)]
+                    end, [], OtherWordCombo),
+            validate_and_form_response(Rest, MaxDigits, MinWordLimit, NewData ++ Resp)
     end.
 
 find_other_word(_, []) -> no_match;
@@ -313,7 +337,3 @@ find_other_word(NextWordLength, [Word|Rest]) ->
         false ->
             find_other_word(NextWordLength, Rest)
     end.
-
-next_word_size(NextWordLength) when NextWordLength rem 2 =:= 0 andalso NextWordLength >= 6-> {3,3};
-next_word_size(NextWordLength) when NextWordLength >= 6 -> {3,4};
-next_word_size(_) -> {0,0}.
