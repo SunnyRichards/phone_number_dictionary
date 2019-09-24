@@ -1,7 +1,7 @@
 phone_number_dictionary
 =====
 
-an erlang application for converting phone number to their respective words from the given dictionary
+an erlang application for converting **phone number** to their respective words from the given dictionary
 
 Build & Running Application
 ---------------------------
